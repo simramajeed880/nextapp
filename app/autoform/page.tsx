@@ -1,7 +1,7 @@
 // FormPage.tsx
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box,
@@ -46,9 +46,18 @@ const FormPage: React.FC = () => {
   });
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [urls, setUrls] = useState<string[]>([]);
   const router = useRouter();
 
   const countries = ['USA', 'Canada', 'UK', 'Australia', 'Germany', 'France', 'India', 'China', 'Japan', 'Pakistan'];
+
+  useEffect(() => {
+    const storedKeywords = JSON.parse(sessionStorage.getItem('keywordsArray') || '[]');
+    const storedUrls = JSON.parse(sessionStorage.getItem('urlsArray') || '[]');
+    setKeywords(storedKeywords);
+    setUrls(storedUrls);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -62,9 +71,15 @@ const FormPage: React.FC = () => {
         ...formData,
         title: formData.topic
       });
-      console.log('Generation successful:', response.blog.substring(0, 100) + '...');
       // Store the generated blog in sessionStorage
       sessionStorage.setItem('generatedBlog', response.blog);
+
+      // Store keywords and urls as arrays in sessionStorage
+      const keywordsArray = formData.keywords.split(',').map(k => k.trim()).filter(Boolean);
+      const urlsArray = formData.urls.split(',').map(u => u.trim()).filter(Boolean);
+      sessionStorage.setItem('keywordsArray', JSON.stringify(keywordsArray));
+      sessionStorage.setItem('urlsArray', JSON.stringify(urlsArray));
+
       // Redirect to blogeditor page
       router.push('/blogeditor');
     } catch (err: any) {
@@ -176,6 +191,30 @@ const FormPage: React.FC = () => {
                 {loading ? <CircularProgress size={24} color="inherit" /> : 'Generate Blog'}
               </Button>
             </Box>
+            <div style={{ margin: '16px 0' }}>
+              <strong>Keywords:</strong>
+              <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {keywords.map((keyword, idx) => (
+                  <li key={keyword}>
+                    <a
+                      href={urls[idx] || '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        textDecoration: 'none',
+                        color: '#1976d2',
+                        border: '1px solid #1976d2',
+                        borderRadius: '16px',
+                        padding: '4px 12px',
+                        fontSize: '0.95em'
+                      }}
+                    >
+                      {keyword}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </Box>
         </Paper>
       </Fade>

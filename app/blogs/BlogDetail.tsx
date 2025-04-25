@@ -4,13 +4,37 @@ import { db } from "../firebase/firebaseConfig"; // Import the Firestore instanc
 import { doc, getDoc } from "firebase/firestore";
 import { getAuth, onAuthStateChanged } from "firebase/auth"; // Import Firebase auth methods
 import Link from "next/link"; // Make sure this is imported
+import Image from "next/image"; // Import Next.js Image component
 import { FaUserCircle } from "react-icons/fa"; // Import the user icon from react-icons
+import Swal from "sweetalert2"; // Import SweetAlert2 for error handling
 import "./Blogs.css"; // Add a CSS file for custom styles
 
 // Define props for the BlogDetail component
 interface BlogDetailProps {
   blogId: string;
 }
+
+// Add this interface for better type checking
+interface FirebaseError extends Error {
+  code: string;
+  message: string;
+}
+
+// Add this error handling utility
+const getErrorMessage = (error: FirebaseError) => {
+  const errorMessages: Record<string, string> = {
+    'permission-denied': 'You do not have permission to view this blog.',
+    'not-found': 'The blog post could not be found.',
+    'unavailable': 'The service is currently unavailable. Please try again later.',
+    'invalid-argument': 'Invalid blog ID provided.',
+    'network-request-failed': 'Network connection error. Please check your internet connection.',
+    'deadline-exceeded': 'Request timed out. Please try again.',
+    'cancelled': 'The operation was cancelled.',
+    'unknown': 'An unexpected error occurred. Please try again.'
+  };
+
+  return errorMessages[error.code] || error.message;
+};
 
 const BlogDetail: React.FC<BlogDetailProps> = ({ blogId }) => {
   const [blog, setBlog] = useState<any>(null);
@@ -34,29 +58,62 @@ const BlogDetail: React.FC<BlogDetailProps> = ({ blogId }) => {
   useEffect(() => {
     const fetchBlog = async () => {
       try {
+        setLoading(true);
         const blogRef = doc(db, "blogs", blogId);
         const blogSnapshot = await getDoc(blogRef);
 
         if (blogSnapshot.exists()) {
           const blogData = blogSnapshot.data();
-          
-          // Ensure the createdAt date is converted to a valid JavaScript Date object
-          if (blogData.createdAt && blogData.createdAt.toDate) {
-            blogData.createdAt = blogData.createdAt.toDate();  // Convert Firestore Timestamp to Date object
-          }
-          
-          setBlog(blogData);
+          setBlog({
+            ...blogData,
+            createdAt: blogData.createdAt?.toDate() || new Date(),
+            id: blogSnapshot.id
+          });
         } else {
-          console.error("No such blog!");
+          throw new Error('not-found');
         }
       } catch (error) {
-        console.error("Error fetching blog:", error);
+        const firebaseError = error as FirebaseError;
+        
+        // Show user-friendly error message using SweetAlert2
+        await Swal.fire({
+          title: 'Error Loading Blog',
+          html: `
+            <div class="space-y-4">
+              <p>${getErrorMessage(firebaseError)}</p>
+              ${firebaseError.code === 'network-request-failed' ? `
+                <div class="bg-yellow-50 p-4 rounded-lg text-yellow-700 text-sm">
+                  <p>Tips to resolve:</p>
+                  <ul class="list-disc list-inside mt-2">
+                    <li>Check your internet connection</li>
+                    <li>Refresh the page</li>
+                    <li>Try again in a few minutes</li>
+                  </ul>
+                </div>
+              ` : ''}
+            </div>
+          `,
+          icon: 'error',
+          confirmButtonColor: '#22c55e',
+          confirmButtonText: firebaseError.code === 'not-found' ? 'Go Back' : 'Try Again',
+          showCancelButton: firebaseError.code === 'network-request-failed',
+          cancelButtonText: 'Refresh Page'
+        }).then((result) => {
+          if (result.isConfirmed && firebaseError.code === 'not-found') {
+            window.history.back();
+          }
+          if (result.dismiss === Swal.DismissReason.cancel) {
+            window.location.reload();
+          }
+        });
       } finally {
         setLoading(false);
       }
     };
 
-    fetchBlog();
+    if (blogId) {
+      fetchBlog();
+    }
   }, [blogId]);
 
   if (loading) {
@@ -107,7 +164,16 @@ const BlogDetail: React.FC<BlogDetailProps> = ({ blogId }) => {
           <p className="blog-date">
             {blog.createdAt ? blog.createdAt.toLocaleString() : "Date not available"}
           </p>
-          
+          {blog.image && (
+            <Image
+              src={blog.image}
+              alt={blog.title}
+              className="blog-image"
+              width={800}
+              height={400}
+              style={{ objectFit: "cover" }}
+            />
+          )}
           {blog.image && <img src={blog.image} alt={blog.title} className="blog-image" />}
           <div className="blog-content" dangerouslySetInnerHTML={{ __html: blog.content }} />
         </div>

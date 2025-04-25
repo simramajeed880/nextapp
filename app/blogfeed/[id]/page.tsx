@@ -2,13 +2,14 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getFirestore, doc, getDoc, setDoc, Timestamp, updateDoc, increment, arrayRemove, arrayUnion } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, Timestamp, updateDoc, increment, arrayRemove, arrayUnion, serverTimestamp } from "firebase/firestore";
 import { initializeApp } from "firebase/app";
 import { firebaseConfig } from "../firebaseConfig"; // Adjust if necessary
 import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { toast } from "react-toastify";
 import { useRouter } from 'next/navigation';
 import { motion } from "framer-motion";
+import { FaThumbsUp } from "react-icons/fa";
 
 const app = initializeApp(firebaseConfig);
 const firestoreDb = getFirestore(app);
@@ -122,6 +123,158 @@ interface BlogData {
   // ...other fields
 }
 
+// Add the updated Blog and Like interfaces
+interface Like {
+  userId: string;
+  username: string;
+  timestamp: any;
+}
+
+interface Blog {
+  id: string;
+  title: string;
+  content: string;
+  authorName: string;
+  authorBio?: string;
+  userId: string;
+  createdAt: any;
+  likes: Like[];
+  comments: {
+    id: string;
+    userId: string;
+    text: string;
+    createdAt: any;
+    userDisplayName: string;
+  }[];
+  shares: string[];
+}
+
+const LikesDisplay = ({ likes }: { likes: Like[] }) => {
+  const [showAllLikes, setShowAllLikes] = useState(false);
+
+  if (!Array.isArray(likes) || likes.length === 0) {
+    return <span className="text-gray-500">No likes yet</span>;
+  }
+
+  const sortedLikes = [...likes].sort((a, b) => {
+    if (!a.timestamp || !b.timestamp) return 0;
+    return b.timestamp.seconds - a.timestamp.seconds;
+  });
+
+  const displayLikes = () => {
+    if (sortedLikes.length === 1) {
+      return (
+        <span>
+          Liked by{' '}
+          <span className="font-semibold text-gray-900">
+            {sortedLikes[0].username} ({sortedLikes[0].userId})
+          </span>
+        </span>
+      );
+    }
+
+    if (sortedLikes.length === 2) {
+      return (
+        <span>
+          Liked by{' '}
+          <span className="font-semibold text-gray-900">
+            {sortedLikes[0].username} ({sortedLikes[0].userId})
+          </span>{' '}
+          and{' '}
+          <span className="font-semibold text-gray-900">
+            {sortedLikes[1].username} ({sortedLikes[1].userId})
+          </span>
+        </span>
+      );
+    }
+
+    return (
+      <span>
+        Liked by{' '}
+        <span className="font-semibold text-gray-900">
+          {sortedLikes[0].username} ({sortedLikes[0].userId})
+        </span>{' '}
+        and{' '}
+        <button
+          onClick={() => setShowAllLikes(true)}
+          className="font-semibold text-green-600 hover:text-green-700 underline-offset-2 hover:underline"
+        >
+          {sortedLikes.length - 1} others
+        </button>
+      </span>
+    );
+  };
+
+  return (
+    <div className="relative">
+      {displayLikes()}
+
+      {/* Updated Likes Modal with User IDs */}
+      {showAllLikes && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowAllLikes(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-white rounded-xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-semibold text-gray-900">
+                Liked by {sortedLikes.length} {sortedLikes.length === 1 ? 'person' : 'people'}
+              </h3>
+              <button
+                onClick={() => setShowAllLikes(false)}
+                className="text-gray-500 hover:text-gray-700 p-1"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-3">
+              {sortedLikes.map((like) => (
+                <motion.div
+                  key={like.userId}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded-lg transition-colors"
+                >
+                  <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center">
+                    <span className="text-white font-medium text-sm">
+                      {like.username?.[0]?.toUpperCase() || '?'}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {like.username}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      ID: {like.userId}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {like.timestamp?.toDate?.() 
+                        ? new Date(like.timestamp.toDate()).toLocaleDateString()
+                        : 'Recently'
+                      }
+                    </p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </div>
+  );
+};
+
 const BlogDetailPage = () => {
   const params = useParams();
   const id = params?.id as string | undefined;
@@ -137,67 +290,42 @@ const BlogDetailPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const user = auth.currentUser;
 
   useEffect(() => {
-    if (!id || Array.isArray(id)) {
-      setError("Blog ID is missing");
-      setLoading(false);
-      return;
-    }
-
     const fetchBlog = async () => {
+      if (!id) return;
+
       try {
         const blogRef = doc(firestoreDb, "blogs", id);
-        const docSnapshot = await getDoc(blogRef);
+        const blogDoc = await getDoc(blogRef);
 
-        if (docSnapshot.exists()) {
-          const blogData = docSnapshot.data();
-
-          // Ensure likes, comments, and shares exist
-          if (!blogData.likes || !blogData.comments || !blogData.shares) {
-            const updatedData = {
-              likes: blogData.likes || Math.floor(Math.random() * 100),
-              comments: blogData.comments || Math.floor(Math.random() * 50),
-              shares: blogData.shares || Math.floor(Math.random() * 20),
-            };
-
-            await setDoc(blogRef, { ...blogData, ...updatedData }, { merge: true });
-
-            blogData.likes = updatedData.likes;
-            blogData.comments = updatedData.comments;
-            blogData.shares = updatedData.shares;
-          }
-
-          // Fetch Firestore keywords & URLs
-          const keywords: string[] = blogData.keywords?.split(",").map((k: string) => k.trim()) || [];
-          const urls: string[] = blogData.urls?.split(",").map((u: string) => u.trim()) || [];
-
-          // Format blog content with embedded links
-          const formattedContent = formatBlogContent(blogData.content || "", keywords, urls);
-
-          const user = auth.currentUser;
-          const name = user ? user.displayName : "Unknown Author";
-
-          if (blogData.createdAt && blogData.createdAt.seconds) {
-            blogData.createdAt = new Date(blogData.createdAt.seconds * 1000); // Convert Firestore timestamp
-          }
-
-          // Handle comments properly
-          const fetchedComments = blogData.commentsList || [];
-          setComments(fetchedComments);
+        if (blogDoc.exists()) {
+          const data = blogDoc.data();
           
-          setBlog({ 
-            ...blogData, 
-            content: formattedContent,
-            comments: fetchedComments.length // Update comment count
+          // Fetch author data
+          let authorData = null;
+          if (data.userId) {
+            const authorRef = doc(firestoreDb, "users", data.userId);
+            const authorSnapshot = await getDoc(authorRef);
+            if (authorSnapshot.exists()) {
+              authorData = authorSnapshot.data();
+              setAuthorName(authorData.name || data.authorName || 'Unknown Author');
+            }
+          }
+
+          setBlog({
+            id: blogDoc.id,
+            ...data,
+            authorName: authorData?.name || data.authorName,
+            likes: Array.isArray(data.likes) ? data.likes : [],
+            comments: Array.isArray(data.comments) ? data.comments : [],
+            shares: Array.isArray(data.shares) ? data.shares : []
           });
-          setAuthorName(name);
-        } else {
-          setError("Blog not found");
         }
       } catch (error) {
+        console.error("Error fetching blog:", error);
         setError("Error fetching blog");
-        console.error("Error fetching blog: ", error);
       } finally {
         setLoading(false);
       }
@@ -221,111 +349,54 @@ const BlogDetailPage = () => {
     checkIfBlogIsSaved();
   }, [id, auth.currentUser]);
 
-  // Update the fetchBlog function in useEffect
-  const fetchBlog = async () => {
-    try {
-      const blogRef = doc(firestoreDb, "blogs", id as string);
-      const docSnapshot = await getDoc(blogRef);
-
-      if (docSnapshot.exists()) {
-        const blogData = docSnapshot.data();
-        
-        // Handle the creation date
-        let createdAt = null;
-        if (blogData.createdAt) {
-          createdAt = blogData.createdAt instanceof Timestamp 
-            ? blogData.createdAt 
-            : new Timestamp(blogData.createdAt.seconds, blogData.createdAt.nanoseconds);
-        }
-
-        // Fetch Firestore keywords & URLs
-        const keywords: string[] = blogData.keywords?.split(",").map((k: string) => k.trim()) || [];
-        const urls: string[] = blogData.urls?.split(",").map((u: string) => u.trim()) || [];
-
-        // Format blog content with embedded links
-        const formattedContent = formatBlogContent(blogData.content || "", keywords, urls);
-
-        // Handle comments properly
-        const fetchedComments = blogData.commentsList || [];
-        setComments(fetchedComments);
-
-        // Fetch author details from Firestore
-        const authorId = blogData.authorId;
-        let authorName = blogData.authorName; // Get author name directly from blog document
-
-        // If we have an authorId, try to get updated name from users collection
-        if (authorId) {
-          try {
-            const authorRef = doc(firestoreDb, "users", authorId);
-            const authorDoc = await getDoc(authorRef);
-            if (authorDoc.exists()) {
-              // Update author name if available in users collection
-              authorName = authorDoc.data().name || authorName;
-            }
-          } catch (error) {
-            console.error("Error fetching author details:", error);
-            // Keep the original author name if there's an error
-          }
-        }
-
-        // Rest of your existing blog data handling
-        setBlog({
-          ...blogData,
-          content: formattedContent,
-          comments: fetchedComments.length,
-          createdAt: createdAt || new Timestamp(Date.now() / 1000, 0), // Fallback to current time if no date
-          authorName // Set the author name
-        });
-        setAuthorName(authorName); // Update the author name state
-      }
-    } catch (error) {
-      console.error("Error fetching blog:", error);
-      setError("Error fetching blog");
-    }
-  };
-
   // Update the handleLike function
   const handleLike = async () => {
-    if (!auth.currentUser) {
-      const wantToLogin = window.confirm('Please login to like posts. Would you like to login now?');
-      if (wantToLogin) {
-        const user = await handleGoogleLogin();
-        if (user) {
-          // Proceed with like after successful login
-          await handleLikeAction();
-        }
-      }
+    if (!user) {
+      router.push('/login');
       return;
     }
 
-    await handleLikeAction();
-  };
-
-  // Add this helper function to handle the like action
-  const handleLikeAction = async () => {
     try {
-      const blogRef = doc(firestoreDb, "blogs", id as string);
-      const userRef = doc(firestoreDb, "users", auth.currentUser!.uid);
+      const blogRef = doc(firestoreDb, "blogs", blog.id);
+      const blogDoc = await getDoc(blogRef);
+      const currentLikes = blogDoc.data()?.likes || [];
+      
+      const hasLiked = currentLikes.some((like: Like) => like.userId === user.uid);
 
-      if (isLiked) {
-        await updateDoc(blogRef, {
-          likes: increment(-1),
-          likedBy: arrayRemove(auth.currentUser!.uid)
-        });
-        setBlog({ ...blog, likes: blog.likes - 1 });
+      if (hasLiked) {
+        // Remove like
+        const updatedLikes = currentLikes.filter((like: Like) => like.userId !== user.uid);
+        await updateDoc(blogRef, { likes: updatedLikes });
+        
+        // Update local state
+        setBlog((prev: any) => ({
+          ...prev,
+          likes: updatedLikes
+        }));
       } else {
-        await updateDoc(blogRef, {
-          likes: increment(1),
-          likedBy: arrayUnion(auth.currentUser!.uid)
-        });
-        setBlog({ ...blog, likes: blog.likes + 1 });
+        // Add new like with user info
+        const newLike: Like = {
+          userId: user.uid,
+          username: user.displayName || '',
+          timestamp: serverTimestamp()
+        };
+        
+        const updatedLikes = [...currentLikes, newLike];
+        await updateDoc(blogRef, { likes: updatedLikes });
+        
+        // Update local state
+        setBlog((prev: any) => ({
+          ...prev,
+          likes: updatedLikes
+        }));
       }
-      setIsLiked(!isLiked);
     } catch (error) {
-      toast.error('Error updating like');
+      console.error("Error updating like:", error);
+      toast.error("Error updating like");
     }
   };
 
+  // Update the handleComment function
   const handleComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser) {
@@ -340,32 +411,41 @@ const BlogDetailPage = () => {
 
     setIsSubmitting(true);
     try {
-      const blogRef = doc(firestoreDb, "blogs", id as string);
+      const timestamp = new Date();
       const newComment = {
-        text: commentText,
-        author: auth.currentUser.displayName || 'Anonymous',
-        date: new Date(),
-        userId: auth.currentUser.uid
+        id: crypto.randomUUID(),
+        userId: auth.currentUser.uid,
+        text: commentText.trim(),
+        createdAt: timestamp,
+        userDisplayName: auth.currentUser.displayName || 'Anonymous'
       };
 
-      await updateDoc(blogRef, {
-        commentsList: arrayUnion(newComment),
-        comments: increment(1)
-      });
+      const blogRef = doc(firestoreDb, "blogs", id as string);
+      const blogDoc = await getDoc(blogRef);
+      
+      if (blogDoc.exists()) {
+        const currentComments = blogDoc.data().comments || [];
+        await updateDoc(blogRef, {
+          comments: [...currentComments, newComment]
+        });
 
-      setComments([...comments, newComment]);
-      setBlog({ ...blog, comments: blog.comments + 1 });
-      setCommentText('');
-      setShowCommentModal(false);
-      toast.success('Comment added successfully');
+        // Update local state
+        setBlog((prev: any) => ({
+          ...prev,
+          comments: [...(prev.comments || []), newComment]
+        }));
+
+        setCommentText('');
+        toast.success('Comment added successfully');
+      }
     } catch (error) {
+      console.error('Error adding comment:', error);
       toast.error('Error adding comment');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Update the handleCommentButtonClick function
   const handleCommentButtonClick = async () => {
     if (!auth.currentUser) {
       const wantToLogin = window.confirm('Please login with Google to comment on this blog. Would you like to login now?');
@@ -484,49 +564,50 @@ const BlogDetailPage = () => {
 
   const blogDate = blog.createdAt?.toLocaleString() || "Date not available";
 
+  // Update the main content section with enhanced UI
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navigation Bar */}
-      <nav className="bg-white border-b border-gray-100 sticky top-0 z-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* Enhanced Navigation Bar */}
+      <nav className="bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-50 transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Left side - Back button */}
           <Link 
             href="/blogfeed" 
-            className="flex items-center space-x-2 text-gray-600 hover:text-black transition-colors"
+            className="flex items-center space-x-2 text-gray-600 hover:text-green-600 transition-all duration-300"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            <span className="font-medium">Back</span>
+            <span className="font-medium">Back to Blogs</span>
           </Link>
 
-          {/* Right side - User Profile */}
+          {/* Enhanced User Profile Section */}
           <div className="relative">
             {auth.currentUser ? (
               <div className="flex items-center">
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                  className="flex items-center space-x-3 group"
+                  className="flex items-center space-x-3 bg-white px-4 py-2 rounded-full shadow-sm hover:shadow-md transition-all duration-300"
                 >
-                  <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center">
-                    <span className="text-white text-sm">
+                  <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center">
+                    <span className="text-white text-sm font-medium">
                       {auth.currentUser.displayName?.[0]?.toUpperCase() || 'U'}
                     </span>
                   </div>
-                  <span className="text-gray-700 group-hover:text-black transition-colors">
+                  <span className="text-gray-700 font-medium">
                     {auth.currentUser.displayName || 'User'}
                   </span>
-                </button>
+                </motion.button>
 
-                {/* Dropdown Menu */}
+                {/* Enhanced Dropdown Menu */}
                 {isUserMenuOpen && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-1 z-50"
+                    className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl py-2 z-50 border border-gray-100"
                   >
-                    {/* Profile Link */}
                     <Link
                       href="/profile"
                       className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
@@ -538,7 +619,6 @@ const BlogDetailPage = () => {
                       <span>Profile</span>
                     </Link>
 
-                    {/* Saved Blogs Link */}
                     <Link
                       href="/saved-blogs"
                       className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
@@ -550,7 +630,6 @@ const BlogDetailPage = () => {
                       <span>Saved Blogs</span>
                     </Link>
 
-                    {/* Sign Out Button */}
                     <button
                       onClick={() => {
                         handleSignOut();
@@ -567,115 +646,104 @@ const BlogDetailPage = () => {
                 )}
               </div>
             ) : (
-              <button
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={handleGoogleLogin}
-                className="flex items-center space-x-2 bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-900 transition-colors"
+                className="flex items-center space-x-2 bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-2 rounded-full shadow-sm hover:shadow-md transition-all duration-300"
               >
-                <span>Login</span>
-              </button>
+                <span className="font-medium">Login</span>
+              </motion.button>
             )}
           </div>
         </div>
       </nav>
 
-      {/* Main Content */}
+      {/* Enhanced Main Content */}
       <main className="max-w-4xl mx-auto px-4 py-12">
         <motion.article 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-xl shadow-sm overflow-hidden"
+          className="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden"
         >
-          {/* Blog Header */}
-          <header className="p-8 border-b border-gray-100">
+          {/* Enhanced Blog Header */}
+          <header className="p-8 border-b border-gray-100 bg-gradient-to-br from-gray-50 to-white">
             <div className="flex items-center space-x-4 mb-6">
-              <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center">
-                <span className="text-white font-medium">
-                  {authorName?.[0]?.toUpperCase() || 'A'}
+              <motion.div 
+                whileHover={{ scale: 1.1 }}
+                className="w-12 h-12 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-md"
+              >
+                <span className="text-white font-medium text-lg">
+                  {blog.authorName?.[0]?.toUpperCase() || 'A'}
                 </span>
-              </div>
+              </motion.div>
               <div>
-                <h3 className="font-medium text-gray-900">{authorName}</h3>
-                <time className="text-sm text-gray-500">
-                  {formatBlogDate(blog.createdAt)}
-                </time>
+                <h3 className="font-semibold text-gray-900 text-lg">
+                  {blog.authorName || 'Unknown Author'}
+                </h3>
+                <div className="flex items-center text-sm text-gray-500 mt-1">
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>{formatBlogDate(blog.createdAt)}</span>
+                </div>
               </div>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+            
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">
               {blog.title}
             </h1>
+            
+            {/* Optional: Add author's bio or description */}
+            {blog.authorBio && (
+              <p className="text-gray-600 mt-2">
+                {blog.authorBio}
+              </p>
+            )}
           </header>
 
-          {/* Blog Content */}
+          {/* Enhanced Blog Content */}
           <div className="p-8">
             <div 
-              className="prose prose-lg max-w-none prose-headings:text-gray-900 prose-p:text-gray-600 prose-a:text-black prose-a:no-underline hover:prose-a:underline"
+              className="prose prose-lg max-w-none prose-headings:text-gray-900 prose-p:text-gray-600 prose-a:text-green-600 prose-a:no-underline hover:prose-a:underline prose-img:rounded-xl prose-blockquote:border-green-500"
               dangerouslySetInnerHTML={{ __html: blog.content }}
             />
           </div>
 
-          {/* Engagement Section */}
-          <div className="px-8 py-6 border-t border-gray-100">
+          {/* Enhanced Engagement Section */}
+          <div className="px-8 py-6 border-t border-gray-100 bg-gradient-to-br from-white to-gray-50">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-8">
-                {/* Likes */}
-                <motion.button 
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+              <div className="flex items-center space-x-6">
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
                   onClick={handleLike}
                   className={`flex items-center space-x-2 ${
-                    isLiked ? 'text-black' : 'text-gray-600'
-                  } hover:text-black transition-colors`}
+                    blog.likes?.some((like: Like) => like.userId === user?.uid)
+                      ? 'text-green-600'
+                      : 'text-gray-500 hover:text-green-600'
+                  } transition-all duration-300`}
                 >
-                  <svg className="w-6 h-6" fill={isLiked ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                      d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" 
-                    />
-                  </svg>
-                  <span className="font-medium">{blog.likes}</span>
+                  <FaThumbsUp className="text-xl" />
+                  <span className="font-medium">{blog.likes?.length || 0}</span>
                 </motion.button>
 
-                {/* Comments */}
-                <motion.button 
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleCommentButtonClick}
-                  className="flex items-center space-x-2 text-gray-600 hover:text-black transition-colors"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
-                    />
-                  </svg>
-                  <span className="font-medium">{blog.comments}</span>
-                </motion.button>
-
-                {/* Share */}
-                <motion.button 
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleShare}
-                  className="flex items-center space-x-2 text-gray-600 hover:text-black transition-colors"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                      d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" 
-                    />
-                  </svg>
-                  <span className="font-medium">{blog.shares}</span>
-                </motion.button>
+                <div className="text-sm text-gray-600">
+                  <LikesDisplay likes={blog.likes} />
+                </div>
               </div>
 
-              {/* Save Button */}
+              {/* Enhanced Save Button */}
               <motion.button 
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
                 onClick={handleSaveBlog}
-                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                className="p-2 rounded-full hover:bg-green-50 transition-all duration-300"
               >
                 <svg 
                   className={`w-6 h-6 ${
-                    isSaved ? 'text-green-600 fill-current' : 'text-gray-600 hover:text-black'
-                  } transition-colors`} 
+                    isSaved ? 'text-green-600 fill-current' : 'text-gray-600 hover:text-green-600'
+                  } transition-colors duration-300`} 
                   stroke="currentColor" 
                   viewBox="0 0 24 24"
                 >
@@ -691,38 +759,67 @@ const BlogDetailPage = () => {
             </div>
           </div>
 
-          {/* Comments Section */}
-          <div className="border-t border-gray-100">
-            <div className="p-8">
-              <h3 className="text-xl font-semibold mb-6">Comments ({comments.length})</h3>
-              
-              {comments.length > 0 ? (
-                <div className="space-y-6">
-                  {comments.map((comment, index) => (
-                    <motion.div 
-                      key={index}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      className="bg-gray-50 rounded-lg p-4"
-                    >
-                      <div className="flex items-center mb-2">
-                        <div className="bg-blue-100 rounded-full p-2">
-                          <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
-                          </svg>
-                        </div>
-                        <div className="ml-3">
-                          <p className="text-sm font-medium text-gray-900">{comment.author}</p>
-                          <p className="text-xs text-gray-500">{formatDate(comment.date)}</p>
-                        </div>
+          {/* Enhanced Comments Section */}
+          <div className="px-8 py-6 bg-gray-50">
+            <h3 className="text-2xl font-semibold mb-6 text-gray-900">Comments</h3>
+            {user ? (
+              <div className="mb-4">
+                <textarea
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-200 focus:border-green-500"
+                  placeholder="Add a comment..."
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                />
+                <button
+                  onClick={handleComment}
+                  disabled={!commentText.trim()}
+                  className="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                >
+                  Post Comment
+                </button>
+              </div>
+            ) : (
+              <div className="p-4 bg-gray-50 rounded-lg text-center">
+                <p className="text-gray-600 mb-2">Please log in to comment</p>
+                <button
+                  onClick={() => router.push('/login')}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                >
+                  Log In
+                </button>
+              </div>
+            )}
+            
+            {/* Display comments */}
+            <div className="space-y-4 mt-6">
+              {Array.isArray(blog?.comments) && blog.comments.length > 0 ? (
+                blog.comments.map((comment: any) => (
+                  <div 
+                    key={comment.id} 
+                    className="bg-white p-4 rounded-lg shadow-sm border border-gray-100"
+                  >
+                    <div className="flex items-center space-x-2 mb-2">
+                      <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                        <span className="text-green-600 font-medium">
+                          {comment.userDisplayName[0].toUpperCase()}
+                        </span>
                       </div>
-                      <p className="text-gray-700 text-sm ml-9">{comment.text}</p>
-                    </motion.div>
-                  ))}
-                </div>
+                      <div>
+                        <span className="font-semibold text-gray-900">
+                          {comment.userDisplayName}
+                        </span>
+                        <span className="text-gray-500 text-sm ml-2">
+                          {new Date(comment.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-gray-700 ml-10">{comment.text}</p>
+                  </div>
+                ))
               ) : (
-                <p className="text-gray-500 text-center py-4">No comments yet. Be the first to comment!</p>
+                <p className="text-center text-gray-500 py-4">
+                  No comments yet. Be the first to comment!
+                </p>
               )}
             </div>
           </div>

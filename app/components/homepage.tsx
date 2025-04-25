@@ -22,9 +22,209 @@ import Swal from 'sweetalert2';
 import { getStripe } from '../lib/stripe';
 import { setDoc, doc } from "firebase/firestore";
 
+// Add this error message mapping object at the top of your file
+type ErrorMessage = {
+  title: string;
+  text: string;
+  icon: string;
+  showLoginButton?: boolean;
+  showPasswordTips?: boolean;
+  showSignupButton?: boolean;
+  showResetButton?: boolean;
+  suggestion?: string;
+};
+
+const errorMessages: Record<string, ErrorMessage> = {
+  'auth/email-already-in-use': {
+    title: 'Email Already Registered',
+    text: 'This email address is already associated with an account. Would you like to sign in instead?',
+    icon: 'info',
+    showLoginButton: true,
+    suggestion: 'Try logging in with your existing account or use a different email address.'
+  },
+  'auth/weak-password': {
+    title: 'Password Security Notice',
+    text: 'Your password needs to be stronger to better protect your account.',
+    icon: 'warning',
+    showPasswordTips: true,
+    suggestion: `
+      Your password should include:
+      • At least 8 characters
+      • Upper and lowercase letters
+      • Numbers and special characters (!@#$%^&*)
+      • No common words or phrases
+    `
+  },
+  'auth/invalid-email': {
+    title: 'Invalid Email Format',
+    text: 'The email address you entered is not properly formatted.',
+    icon: 'error',
+    suggestion: 'Please check for typos and ensure your email follows the format: example@domain.com'
+  },
+  'auth/user-not-found': {
+    title: 'Account Not Found',
+    text: 'We couldn\'t find an account with this email address.',
+    icon: 'question',
+    showSignupButton: true,
+    suggestion: 'Double-check your email or create a new account to get started.'
+  },
+  'auth/wrong-password': {
+    title: 'Incorrect Password',
+    text: 'The password you entered doesn\'t match our records.',
+    icon: 'error',
+    showResetButton: true,
+    suggestion: 'Try again or reset your password if you\'ve forgotten it.'
+  },
+  'auth/too-many-requests': {
+    title: 'Too Many Attempts',
+    text: 'Access temporarily blocked due to multiple failed login attempts.',
+    icon: 'warning',
+    suggestion: 'Please wait a few minutes before trying again or reset your password.'
+  },
+  'auth/network-request-failed': {
+    title: 'Connection Error',
+    text: 'Unable to connect to our servers.',
+    icon: 'error',
+    suggestion: 'Please check your internet connection and try again.'
+  },
+  'auth/popup-closed-by-user': {
+    title: 'Google Sign-in Cancelled',
+    text: 'The Google sign-in window was closed before completion.',
+    icon: 'info',
+    suggestion: 'Please try again and complete the Google sign-in process.'
+  },
+  'auth/expired-action-code': {
+    title: 'Link Expired',
+    text: 'The password reset link has expired.',
+    icon: 'warning',
+    showResetButton: true,
+    suggestion: 'Request a new password reset link to continue.'
+  },
+  'auth/invalid-action-code': {
+    title: 'Invalid Reset Link',
+    text: 'This password reset link is no longer valid.',
+    icon: 'error',
+    showResetButton: true,
+    suggestion: 'Please request a new password reset link.'
+  }
+};
+
+// Add this error message mapping object near the top of your file
+const subscriptionErrorMessages = {
+  'subscription/free-limit-reached': {
+    title: 'Free Plan Limit Reached',
+    text: 'You have reached your monthly limit of 3 blog posts.',
+    icon: 'info',
+    suggestion: 'Upgrade your plan to continue publishing.',
+    action: 'Upgrade Now'
+  },
+  'subscription/payment-failed': {
+    title: 'Payment Failed',
+    text: 'We could not process your payment.',
+    icon: 'error',
+    suggestion: 'Please check your payment details and try again.',
+    action: 'Try Again'
+  },
+  'subscription/already-subscribed': {
+    title: 'Active Subscription',
+    text: 'You already have an active subscription.',
+    icon: 'warning',
+    suggestion: 'You can manage your subscription in your profile settings.',
+    action: 'View Subscription'
+  }
+};
+
 interface ModalProps {
   onClose: () => void;
 }
+
+const NavLink: React.FC<{ 
+  href: string; 
+  children: React.ReactNode; 
+  isActive?: boolean;
+  onClick?: () => void;
+}> = ({ href, children, isActive, onClick }) => (
+  <a
+    href={href}
+    onClick={onClick}
+    className={`
+      relative px-1 py-2 text-sm font-medium transition-colors
+      ${isActive ? 'text-green-600' : 'text-gray-600 hover:text-gray-900'}
+      after:content-[''] after:absolute after:left-0 after:bottom-0 
+      after:h-0.5 after:w-full after:bg-green-500 
+      after:scale-x-0 hover:after:scale-x-100 
+      after:transition-transform after:duration-300
+    `}
+  >
+    {children}
+  </a>
+);
+
+const UserMenu: React.FC<{ 
+  user: any; 
+  onLogout: () => void;
+  onUpgrade: () => void;
+}> = ({ user, onLogout, onUpgrade }) => {
+  return (
+    <div className="flex items-center space-x-4">
+      {/* Upgrade Button */}
+      <button
+        onClick={onUpgrade}
+        className="px-4 py-2 bg-green-500 text-white rounded-full hover:bg-green-600 transition-colors flex items-center space-x-1"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+        </svg>
+        <span>Upgrade</span>
+      </button>
+
+      {/* User Menu */}
+      <div className="relative group">
+        <div className="flex items-center space-x-3 cursor-pointer">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-r from-green-400 to-green-600 flex items-center justify-center text-white overflow-hidden">
+            {user.photoURL ? (
+              <Image
+                src={user.photoURL}
+                alt="Profile"
+                width={40}
+                height={40}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-lg font-semibold">
+                {user.displayName?.[0]?.toUpperCase() || 'U'}
+              </span>
+            )}
+          </div>
+          <span className="text-sm font-medium text-gray-700 hidden md:block">
+            {user.displayName || 'User'}
+          </span>
+        </div>
+
+        <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg py-1 hidden group-hover:block border border-gray-100 transform transition-all duration-300 opacity-0 group-hover:opacity-100">
+          <Link 
+            href="/profile" 
+            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            My Profile
+          </Link>
+          <Link 
+            href="/dashboard" 
+            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Dashboard
+          </Link>
+          <button
+            onClick={onLogout}
+            className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-50 border-t border-gray-100"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const Homepage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -34,7 +234,7 @@ const Homepage: React.FC = () => {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [blogFunctionality, setBlogFunctionality] = useState<"manual" | "automated">("manual"); // New state for blog functionality
+  const [blogFunctionality, setBlogFunctionality] = useState<"manual" | "automated">("manual");
   const [currentUser, setCurrentUser] = useState<any>(null);
   const router = useRouter();
   const aboutSectionRef = useRef<HTMLDivElement>(null);
@@ -57,7 +257,6 @@ const Homepage: React.FC = () => {
       setIsLoggedIn(!!user);
     });
 
-    // Check URL parameters for subscription modal
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('openSubscription') === 'true') {
       setIsSubscriptionModalOpen(true);
@@ -66,7 +265,6 @@ const Homepage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Clear login fields when opening the login popup
   useEffect(() => {
     if (isLoginFormVisible) {
       setEmail("");
@@ -115,7 +313,6 @@ const Homepage: React.FC = () => {
   };
 
   const toggleLoginForm = () => {
-    // Clear all fields before showing the form
     setEmail("");
     setPassword("");
     setName("");
@@ -138,7 +335,6 @@ const Homepage: React.FC = () => {
   const toggleSignupForm = () => {
     setIsSignupFormVisible(!isSignupFormVisible);
     setIsLoginFormVisible(false);
-    // Clear all fields
     setEmail("");
     setPassword("");
     setName("");
@@ -154,26 +350,119 @@ const Homepage: React.FC = () => {
       const user = userCredential.user;
 
       if (user.emailVerified) {
-        setIsLoginFormVisible(false); // Close login popup
+        setIsLoginFormVisible(false);
         setCurrentUser(user);
         setIsLoggedIn(true);
-        // Do NOT redirect to manual editor, stay on homepage
       } else {
-        setError("Please verify your email before logging in.");
+        await Swal.fire({
+          title: 'Email Not Verified',
+          html: `
+            <div class="space-y-4">
+              <p>Please verify your email before logging in.</p>
+              <div class="bg-yellow-50 p-4 rounded-lg text-yellow-700 text-sm">
+                Check your inbox and spam folder for the verification email.
+              </div>
+            </div>
+          `,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Resend Verification Email',
+          cancelButtonText: 'Close',
+          confirmButtonColor: '#22c55e'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            sendEmailVerification(user);
+            Swal.fire({
+              title: 'Email Sent!',
+              text: 'Verification email has been resent.',
+              icon: 'success',
+              confirmButtonColor: '#22c55e'
+            });
+          }
+        });
         await auth.signOut();
       }
     } catch (error: any) {
-      setError("Login failed. Please check your credentials.");
+      const errorCode = error.code as keyof typeof errorMessages;
+      const errorDetails = errorMessages[errorCode] || {
+        title: 'Login Error',
+        text: 'An unexpected error occurred while trying to log you in.',
+        icon: 'error',
+        suggestion: 'Please try again or contact support if the problem persists.'
+      };
+
+      await Swal.fire({
+        title: errorDetails.title,
+        html: `
+          <div class="space-y-4">
+            <p class="text-gray-700">${errorDetails.text}</p>
+            ${errorDetails.suggestion ? `
+              <div class="bg-gray-50 p-4 rounded-lg text-sm">
+                <p class="font-medium text-gray-700 mb-2">Helpful Tips:</p>
+                <div class="text-gray-600 whitespace-pre-line">
+                  ${errorDetails.suggestion}
+                </div>
+              </div>
+            ` : ''}
+            ${errorDetails.showPasswordTips ? `
+              <div class="bg-yellow-50 p-4 rounded-lg text-sm">
+                <p class="font-medium text-yellow-700 mb-2">Password Requirements:</p>
+                <ul class="list-disc list-inside space-y-1 text-yellow-600">
+                  <li>Minimum 8 characters long</li>
+                  <li>At least one uppercase letter (A-Z)</li>
+                  <li>At least one lowercase letter (a-z)</li>
+                  <li>At least one number (0-9)</li>
+                  <li>At least one special character (!@#$%^&*)</li>
+                </ul>
+              </div>
+            ` : ''}
+          </div>
+        `,
+        icon: errorDetails.icon as any,
+        showCancelButton: Boolean(errorDetails.showLoginButton || errorDetails.showSignupButton || errorDetails.showResetButton),
+        confirmButtonText: errorDetails.showLoginButton ? 'Go to Login' : 
+                          errorDetails.showSignupButton ? 'Create Account' : 
+                          errorDetails.showResetButton ? 'Reset Password' : 'Try Again',
+        cancelButtonText: 'Close',
+        confirmButtonColor: '#22c55e'
+      }).then((result) => {
+        if (result.isConfirmed) {
+          if (errorDetails.showLoginButton) toggleLoginForm();
+          if (errorDetails.showSignupButton) toggleSignupForm();
+          if (errorDetails.showResetButton) handleForgotPassword(new MouseEvent('click') as any);
+        }
+      });
     }
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (password.length < 6) {
+      await Swal.fire({
+        title: 'Weak Password',
+        html: `
+          <div class="space-y-4">
+            <p>Please use a stronger password.</p>
+            <div class="bg-gray-50 p-4 rounded-lg text-sm text-left">
+              <p class="font-medium mb-2">Password Requirements:</p>
+              <ul class="list-disc list-inside space-y-1 text-gray-600">
+                <li>At least 6 characters long</li>
+                <li>Include numbers and letters</li>
+                <li>Include special characters</li>
+              </ul>
+            </div>
+          </div>
+        `,
+        icon: 'warning',
+        confirmButtonColor: '#22c55e'
+      });
+      return;
+    }
+
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // Initialize user document with savedBlogs array
       await setDoc(doc(db, "users", userCredential.user.uid), {
         name: name,
         email: email,
@@ -183,11 +472,37 @@ const Homepage: React.FC = () => {
 
       await updateProfile(userCredential.user, { displayName: name });
       await sendEmailVerification(userCredential.user);
-      alert("A verification email has been sent. Please verify your email before logging in.");
+
+      await Swal.fire({
+        title: 'Account Created Successfully!',
+        html: `
+          <div class="space-y-4">
+            <p>Welcome to Blog Fusion, ${name}!</p>
+            <div class="bg-green-50 p-4 rounded-lg text-green-700 text-sm">
+              A verification email has been sent to your inbox. Please verify your email to continue.
+            </div>
+          </div>
+        `,
+        icon: 'success',
+        confirmButtonColor: '#22c55e'
+      });
+
       toggleLoginForm();
       setIsSignupFormVisible(false);
     } catch (error: any) {
-      setError(`${error.message}. Please try again.`);
+      const errorCode = error.code as keyof typeof errorMessages;
+      const errorDetails = errorMessages[errorCode] || {
+        title: 'Sign Up Error',
+        text: 'An unexpected error occurred. Please try again.',
+        icon: 'error'
+      };
+
+      await Swal.fire({
+        title: errorDetails.title,
+        html: `<div class="text-center">${errorDetails.text}</div>`,
+        icon: errorDetails.icon as any,
+        confirmButtonColor: '#22c55e'
+      });
     }
   };
 
@@ -201,7 +516,6 @@ const Homepage: React.FC = () => {
         <div className="bg-white p-6 rounded shadow-lg w-full sm:w-3/4 md:w-2/3 lg:w-1/2">
           <h2 className="text-xl font-bold text-center mb-4">Subscription Plans</h2>
           <div className="flex justify-between mb-4">
-            {/* Basic Package */}
             <div className="p-4 w-1/3 text-center border-2 border-gray-300 rounded-lg mx-4">
               <h3 className="font-bold text-lg mb-2">Basic</h3>
               <p className="text-sm mb-4">Perfect for individual users.</p>
@@ -211,7 +525,6 @@ const Homepage: React.FC = () => {
               </button>
             </div>
 
-            {/* Medium Package */}
             <div className="p-4 w-1/3 text-center border-2 border-gray-300 rounded-lg mx-4">
               <h3 className="font-bold text-lg mb-2">Medium</h3>
               <p className="text-sm mb-4">Ideal for small teams.</p>
@@ -221,7 +534,6 @@ const Homepage: React.FC = () => {
               </button>
             </div>
 
-            {/* Premium Package */}
             <div className="p-4 w-1/3 text-center border-2 border-gray-300 rounded-lg mx-4">
               <h3 className="font-bold text-lg mb-2">Premium</h3>
               <p className="text-sm mb-4">Best for large organizations.</p>
@@ -233,9 +545,6 @@ const Homepage: React.FC = () => {
           </div>
 
           <div className="flex justify-center mt-4">
-            
-            
-            
             <button
               className="px-6 py-2 bg-red-500 text-white rounded hover:bg-red-600 mx-auto"
               onClick={onClose}
@@ -255,10 +564,9 @@ const Homepage: React.FC = () => {
       const user = userCredential.user;
 
       if (user.emailVerified) {
-        setIsLoginFormVisible(false); // Close login popup
+        setIsLoginFormVisible(false);
         setCurrentUser(user);
         setIsLoggedIn(true);
-        // Do NOT redirect, stay on homepage
       } else {
         setError("Please verify your email before logging in.");
         await auth.signOut();
@@ -296,45 +604,86 @@ const Homepage: React.FC = () => {
 
   const toggleFaq = (index: number) => {
     setFaqOpenStates((prevStates) => {
-      const newStates = [...prevStates];
-      newStates[index] = !newStates[index];
-      return newStates;
+      if (prevStates[index]) {
+        return prevStates.map((_, i) => i === index ? false : false);
+      }
+      return prevStates.map((_, i) => i === index);
     });
   };
 
   const handleSubscriptionSelect = async (plan: string) => {
     if (!currentUser) {
-      Swal.fire({
-        title: 'Please Login',
-        text: 'You need to be logged in to continue',
-        icon: 'warning',
-        confirmButtonColor: '#3B82F6',
+      await Swal.fire({
+        title: 'Login Required',
+        html: `
+          <div class="space-y-4">
+            <p>Please log in to subscribe to our premium features.</p>
+            <div class="bg-gray-50 p-4 rounded-lg text-sm">
+              <p class="font-medium text-gray-700">Why login?</p>
+              <ul class="list-disc list-inside mt-2 text-gray-600">
+                <li>Save your preferences</li>
+                <li>Access premium features</li>
+                <li>Track your subscriptions</li>
+              </ul>
+            </div>
+          </div>
+        `,
+        icon: 'info',
+        showCancelButton: true,
+        confirmButtonText: 'Login Now',
+        cancelButtonText: 'Maybe Later',
+        confirmButtonColor: '#22c55e',
+      }).then((result) => {
+        if (result.isConfirmed) {
+          toggleLoginForm();
+        }
       });
-      toggleLoginForm();
       return;
     }
-
-    // For basic plan, redirect to text-editor
+  
     if (plan.toLowerCase() === 'basic') {
-      router.push('/text-editor');
+      await Swal.fire({
+        title: 'Free Plan Selected',
+        html: `
+          <div class="space-y-4">
+            <p>You can start writing blogs with our basic features.</p>
+            <div class="bg-green-50 p-4 rounded-lg text-green-700">
+              <p class="font-medium">Free Plan Features:</p>
+              <ul class="list-disc list-inside mt-2">
+                <li>3 blog posts per month</li>
+                <li>Basic editor features</li>
+                <li>Community support</li>
+              </ul>
+            </div>
+          </div>
+        `,
+        icon: 'success',
+        confirmButtonText: 'Start Writing',
+        confirmButtonColor: '#22c55e',
+      }).then((result) => {
+        if (result.isConfirmed) {
+          router.push('/text-editor');
+        }
+      });
       return;
     }
   
     try {
-      Swal.fire({
+      await Swal.fire({
         title: 'Processing...',
-        text: 'Please wait while we redirect you to checkout',
+        html: `
+          <div class="space-y-4">
+            <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-500 mx-auto"></div>
+            <p>Setting up your subscription...</p>
+          </div>
+        `,
         allowOutsideClick: false,
-        didOpen: () => {
-          Swal.showLoading();
-        }
+        showConfirmButton: false
       });
   
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           plan,
           userId: currentUser.uid,
@@ -344,17 +693,13 @@ const Homepage: React.FC = () => {
   
       const data = await response.json();
   
-      if (!response.ok || data.error) {
-        throw new Error(data.error || data.message || 'Failed to create checkout session');
-      }         
-  
-      if (!data.sessionId) {
-        throw new Error('No session ID returned from server');
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create checkout session');
       }
   
       const stripe = await getStripe();
       if (!stripe) {
-        throw new Error('Failed to load Stripe');
+        throw new Error('Failed to load payment system');
       }
   
       const { error } = await stripe.redirectToCheckout({
@@ -362,17 +707,39 @@ const Homepage: React.FC = () => {
       });
   
       if (error) {
-        throw new Error(error.message);
+        throw error;
       }
   
     } catch (error: any) {
-      console.error('Subscription error:', error);
-      Swal.close();
-      Swal.fire({
-        title: 'Error',
-        text: error.message || 'Failed to process subscription',
+      const errorCode = error.code as keyof typeof subscriptionErrorMessages;
+      const errorDetails = subscriptionErrorMessages[errorCode] || {
+        title: 'Subscription Error',
+        text: 'We encountered an issue while processing your request.',
         icon: 'error',
-        confirmButtonColor: '#3B82F6',
+        suggestion: 'Please try again or contact support if the problem persists.',
+        action: 'Try Again'
+      };
+  
+      await Swal.fire({
+        title: errorDetails.title,
+        html: `
+          <div class="space-y-4">
+            <p>${errorDetails.text}</p>
+            <div class="bg-gray-50 p-4 rounded-lg text-sm">
+              <p class="text-gray-700">${errorDetails.suggestion}</p>
+              ${error.message ? `
+                <div class="mt-2 p-2 bg-red-50 rounded text-red-600 text-xs">
+                  Error details: ${error.message}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `,
+        icon: errorDetails.icon as any,
+        confirmButtonText: errorDetails.action,
+        confirmButtonColor: '#22c55e',
+        showCancelButton: true,
+        cancelButtonText: 'Close'
       });
     }
   };
@@ -394,7 +761,6 @@ const Homepage: React.FC = () => {
           </div>
 
           <div className="flex flex-col md:flex-row gap-6">
-            {/* Basic (Free) Plan */}
             <div className="flex-1 p-6 border-2 border-gray-200 rounded-xl hover:border-green-500 transition-all duration-300">
               <div className="flex flex-col h-full">
                 <div className="mb-6">
@@ -448,7 +814,6 @@ const Homepage: React.FC = () => {
               </div>
             </div>
 
-            {/* Medium Plan */}
             <div className="flex-1 p-6 border-2 border-green-500 rounded-xl bg-green-50 transform scale-105 relative">
               <div className="absolute top-0 right-0 bg-green-500 text-white text-xs px-3 py-1 rounded-full -mt-2 -mr-2">
                 Popular
@@ -474,7 +839,7 @@ const Homepage: React.FC = () => {
                     AI-generated blog (limited to 3 blogs/month)
                   </div>
                   <div className="flex items-center text-sm">
-                    <svg className="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     Manual editing before publishing
@@ -505,7 +870,6 @@ const Homepage: React.FC = () => {
               </div>
             </div>
 
-            {/* Premium Plan */}
             <div className="flex-1 p-6 border-2 border-gray-200 rounded-xl hover:border-green-500 transition-all duration-300">
               <div className="flex flex-col h-full">
                 <div className="mb-6">
@@ -566,145 +930,56 @@ const Homepage: React.FC = () => {
 
   return (
     <div>
-      {/* Navbar */}
-      <nav className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 py-4 bg-white border-b shadow">
-        <div className="flex items-center space-x-6">
-          <Link href="/" passHref>
-            <div className="text-xl font-bold cursor-pointer">BLOG FUSION</div>
-          </Link>
+      {/* Enhanced Navbar */}
+      <nav className="fixed top-0 left-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-gray-200/50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <Link href="/" className="flex items-center space-x-2">
+              <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-green-600 to-green-500">
+                BLOG FUSION
+              </span>
+            </Link>
 
-          {/* Navbar Menu */}
-          <ul className="flex space-x-6">
-            <li>
-              <Link href="#home" className="hover:text-gray-500">
-                Home
-              </Link>
-            </li>
-            <li>
-              <button
-                className="hover:text-gray-500"
-                onClick={() => scrollToSection(aboutSectionRef)}
-              >
-                About
-              </button>
-            </li>
-            <li>
-              <button
-                className="hover:text-gray-500"
-                onClick={() => scrollToSection(servicesSectionRef)}
-              >
-                Services
-              </button>
-            </li>
-            <li>
-              <button
-                className="hover:text-gray-500"
-                onClick={() => scrollToSection(faqSectionRef)}
-              >
-                FAQ
-              </button>
-            </li>
-            <li>
-              <Link href="/blogfeed" className="hover:text-gray-500">
-                Blog Feed
-              </Link>
-            </li>
-            <li>
-              <button
-                className="hover:text-gray-500"
-                onClick={() => scrollToSection(contactSectionRef)}
-              >
-                Contact Us
-              </button>
-            </li>
-          </ul>
-        </div>
+            {/* Desktop Navigation */}
+            <div className="hidden md:flex items-center space-x-8">
+              <NavLink href="#home" isActive={true}>Home</NavLink>
+              <NavLink href="#about" onClick={() => scrollToSection(aboutSectionRef)}>About</NavLink>
+              <NavLink href="#services" onClick={() => scrollToSection(servicesSectionRef)}>Services</NavLink>
+              <NavLink href="/blogfeed">Blog Feed</NavLink>
+              <NavLink href="#contact" onClick={() => scrollToSection(contactSectionRef)}>Contact</NavLink>
+            </div>
 
-        {/* Login & Sign Up Buttons */}
-        <div className="flex items-center space-x-4">
-          {currentUser ? (
+            {/* Auth Buttons */}
             <div className="flex items-center space-x-4">
-              <button 
-                onClick={() => setIsSubscriptionModalOpen(true)}
-                className="px-4 py-2 text-white bg-green-500 rounded hover:bg-green-600 transition-colors"
-              >
-                Subscription
-              </button>
-              <div className="relative group">
-                <div className="flex items-center space-x-2 cursor-pointer">
-                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
-                    {currentUser.photoURL ? (
-                      <Image
-                        src={currentUser.photoURL}
-                        alt="Profile"
-                        width={40}
-                        height={40}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-xl font-bold text-gray-600">
-                        {currentUser.displayName ? currentUser.displayName[0].toUpperCase() : 'U'}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-gray-700 hidden md:block">
-                    {currentUser.displayName || 'User'}
-                  </span>
-                </div>
-
-                {/* Dropdown Menu */}
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-1 hidden group-hover:block border border-gray-100">
-                  <Link 
-                    href="/profile" 
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    My Profile
-                  </Link>
-                  <Link 
-                    href="/dashboard" 
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    Dashboard
-                  </Link>
+              {currentUser ? (
+                <UserMenu 
+                  user={currentUser} 
+                  onLogout={handleLogout} 
+                  onUpgrade={() => setIsSubscriptionModalOpen(true)}
+                />
+              ) : (
+                <div className="flex items-center space-x-3">
                   <button
-                    onClick={async () => {
-                      try {
-                        await auth.signOut();
-                        setIsLoggedIn(false);
-                        router.push('/');
-                      } catch (error) {
-                        console.error("Error signing out:", error);
-                      }
-                    }}
-                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-50"
+                    onClick={toggleLoginForm}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
                   >
-                    Sign Out
+                    Login
+                  </button>
+                  <button
+                    onClick={toggleSignupForm}
+                    className="px-4 py-2 bg-black text-white rounded-full hover:bg-gray-800 transition-colors"
+                  >
+                    Get Started
                   </button>
                 </div>
-              </div>
+              )}
             </div>
-          ) : (
-            <>
-              <button
-                onClick={toggleLoginForm}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
-              >
-                Login
-              </button>
-              <button
-                onClick={toggleSignupForm}
-                className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 transition-colors"
-              >
-                Sign Up
-              </button>
-            </>
-          )}
+          </div>
         </div>
       </nav>
 
       {/* Hero Section */}
       <section className="relative min-h-screen bg-gradient-to-b from-gray-900 to-black">
-        {/* Background with overlay */}
         <div className="absolute inset-0">
           <Image
             src="/heropic.jpg"
@@ -713,56 +988,96 @@ const Homepage: React.FC = () => {
             objectFit="cover"
             quality={100}
             priority
-            className="opacity-50"
+            className="opacity-40"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/70"></div>
+          <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/50 to-black/80"></div>
         </div>
 
-        {/* Content */}
         <div className="relative h-screen flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8 }}
-            className="text-center"
+            className="text-center max-w-4xl"
           >
-            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6 tracking-tight">
-              Unleash Your Voice
-              <span className="block text-green-400">Through Words</span>
-            </h1>
-            <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-2xl mx-auto">
-              Create, share, and inspire with your unique stories
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <motion.h1 
+              className="text-5xl md:text-7xl font-bold text-white mb-8 leading-tight"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              Unleash Your Voice{' '}
+              <span className="block mt-2 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-green-600">
+                Through Words
+              </span>
+            </motion.h1>
+            <motion.p 
+              className="text-xl md:text-2xl text-gray-300 mb-12 max-w-2xl mx-auto leading-relaxed"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+            >
+              Create, share, and inspire with your unique stories. Join our community of passionate writers.
+            </motion.p>
+            <motion.div 
+              className="flex flex-col sm:flex-row gap-6 justify-center"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6 }}
+            >
               <button
                 onClick={() => scrollToSection(servicesSectionRef)}
-                className="px-8 py-3 bg-green-500 text-white font-medium rounded-lg hover:bg-green-600 transform hover:scale-105 transition-all duration-300"
+                className="px-8 py-4 bg-green-500 text-white font-medium rounded-full hover:bg-green-600 transform hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-green-500/25"
               >
-                Get Started
+                Start Writing Now
+                <motion.span 
+                  className="ml-2"
+                  animate={{ x: [0, 5, 0] }}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                >
+                  →
+                </motion.span>
               </button>
               <button
                 onClick={() => scrollToSection(aboutSectionRef)}
-                className="px-8 py-3 bg-transparent text-white border-2 border-white rounded-lg hover:bg-white/10 transition-all duration-300"
+                className="px-8 py-4 bg-white/10 text-white border-2 border-white/20 rounded-full backdrop-blur-sm hover:bg-white/20 transition-all duration-300"
               >
                 Learn More
               </button>
-            </div>
+            </motion.div>
           </motion.div>
 
-          {/* Scroll Indicator */}
-          <div className="absolute bottom-8 animate-bounce">
-            <svg 
-              className="w-6 h-6 text-white" 
-              fill="none" 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth="2" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
-              <path d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
-            </svg>
-          </div>
+          <motion.div
+            className="absolute inset-0 pointer-events-none"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1 }}
+          >
+            <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-green-500/10 rounded-full blur-3xl"></div>
+            <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
+          </motion.div>
+
+          <motion.div
+            className="absolute bottom-8 cursor-pointer"
+            onClick={() => scrollToSection(aboutSectionRef)}
+            animate={{ y: [0, 10, 0] }}
+            transition={{ repeat: Infinity, duration: 2 }}
+          >
+            <div className="flex flex-col items-center">
+              <span className="text-white/60 text-sm mb-2">Scroll to explore</span>
+              <svg 
+                className="w-6 h-6 text-white/60" 
+                fill="none" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth="2" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+              >
+                <path d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+              </svg>
+            </div>
+          </motion.div>
         </div>
       </section>
 
@@ -774,7 +1089,6 @@ const Homepage: React.FC = () => {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            {/* Content */}
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               whileInView={{ opacity: 1, x: 0 }}
@@ -826,7 +1140,6 @@ const Homepage: React.FC = () => {
                 </Link>
               </motion.div>
 
-            {/* Image */}
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               whileInView={{ opacity: 1, x: 0 }}
@@ -866,7 +1179,6 @@ const Homepage: React.FC = () => {
           </div>
 
           <div className="grid gap-8 md:grid-cols-2 max-w-5xl mx-auto">
-            {/* Manual Blog Writing Card */}
             <div className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-100">
               <div className="relative h-48 overflow-hidden">
                 <Image
@@ -877,7 +1189,7 @@ const Homepage: React.FC = () => {
                   className="transform hover:scale-105 transition-transform duration-300"
                 />
               </div>
-              <div className="p-6 flex flex-col h-[calc(100%-192px)]"> {/* Fixed height calculation */}
+              <div className="p-6 flex flex-col h-[calc(100%-192px)]">
                 <div className="flex items-center mb-4">
                   <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center mr-3">
                     <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -886,7 +1198,7 @@ const Homepage: React.FC = () => {
                   </div>
                   <h4 className="text-lg font-semibold">Manual Blog Writing</h4>
                 </div>
-                <p className="text-gray-600 text-sm mb-4 flex-grow"> {/* Added flex-grow */}
+                <p className="text-gray-600 text-sm mb-4 flex-grow">
                   Create compelling content with our intuitive editor. Perfect for crafting detailed, 
                   personalized blog posts with complete creative control.
                 </p>
@@ -909,7 +1221,6 @@ const Homepage: React.FC = () => {
               </div>
             </div>
 
-            {/* Automation Blog Writing Card */}
             <div className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-100">
               <div className="relative h-48 overflow-hidden">
                 <Image
@@ -920,7 +1231,7 @@ const Homepage: React.FC = () => {
                   className="transform hover:scale-105 transition-transform duration-300"
                 />
               </div>
-              <div className="p-6 flex flex-col h-[calc(100%-192px)]"> {/* Fixed height calculation */}
+              <div className="p-6 flex flex-col h-[calc(100%-192px)]">
                 <div className="flex items-center mb-4">
                   <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center mr-3">
                     <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -929,7 +1240,7 @@ const Homepage: React.FC = () => {
                   </div>
                   <h4 className="text-lg font-semibold">Automation Blog Writing</h4>
                 </div>
-                <p className="text-gray-600 text-sm mb-4 flex-grow"> {/* Added flex-grow */}
+                <p className="text-gray-600 text-sm mb-4 flex-grow">
                   Let AI assist you in creating SEO-optimized content. Ideal for consistent 
                   posting and data-driven blog creation.
                 </p>
@@ -995,7 +1306,6 @@ const Homepage: React.FC = () => {
       {/* Contact Section */}
       <section ref={contactSectionRef} id="contact" className="flex flex-col md:flex-row items-center my-16 px-6 md:px-12">
         <div className="max-w-4xl mx-auto grid gap-8 lg:grid-cols-2">
-          {/* Contact Form */}
           <div>
             <h3 className="text-black-500 text-sm font-bold mb-2">GET IN TOUCH</h3>
             <h2 className="text-3xl font-bold mb-4">
@@ -1059,7 +1369,6 @@ const Homepage: React.FC = () => {
             )}
           </div>
 
-          {/* Contact Info */}
           <div className="bg-white p-8 rounded-lg shadow-lg">
             <h3 className="text-xl font-bold mb-4">Contact Information</h3>
             <p className="mb-4">
@@ -1078,7 +1387,6 @@ const Homepage: React.FC = () => {
         </div>
       </section>
 
-      {/* Login Form */}
       {isLoginFormVisible && (
         <section id="#login" className="fixed inset-0 bg-gray-800 bg-opacity-50 flex justify-center items-center z-50">
           <div className="relative bg-white p-8 rounded shadow-lg w-full max-w-md">
@@ -1162,7 +1470,6 @@ const Homepage: React.FC = () => {
         </section>
       )}
 
-      {/* Sign Up Form */}
       {isSignupFormVisible && (
         <section className="fixed inset-0 bg-gray-800 bg-opacity-50 flex justify-center items-center z-50">
           <div className="relative bg-white p-8 rounded shadow-lg w-full max-w-md">
@@ -1235,7 +1542,6 @@ const Homepage: React.FC = () => {
         </section>
       )}
 
-      {/* Footer Section */}
       <footer className="bg-gray-900 text-white py-6">
         <div className="text-center">
           <p className="text-sm">&copy; 2025 Blog Fusion. All Rights Reserved.</p>
